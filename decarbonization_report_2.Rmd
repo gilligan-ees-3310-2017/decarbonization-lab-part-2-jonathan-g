@@ -1,7 +1,7 @@
 ---
-title: 'put the title of your project here'
-author: "put your name here"
-date: "Due Oct. 30, 2017"
+title: 'Top-Down Decarbonization Lab'
+author: "Jonathan Gilligan"
+date: "Due Nov. 6, 2017"
 bibliography: "decarbonization.bib" # this line tells RMarkdown which file to use for the bibliography
 nocite: |
   @pielke_climate_fix_2010,
@@ -79,8 +79,8 @@ Top-down projections predict that global energy demand will be
  e_factors = emissions_factors()
  
  plot_fuel_mix(world_fuel_mix)
- ```
- 
+```
+
 Let's calculate what the emissions in `r target_year` would be if the world 
 were still using this fuel mix.
 
@@ -107,7 +107,7 @@ world_fuel_mix_2050 = world_fuel_mix %>%
 
 Now, let's combine the emissions factors and the fuel mix into a single table:
 
-````{r world_emissions_tab, warning = FALSE}
+```{r world_emissions_tab, warning = FALSE}
 world_fuel_mix_2050 = world_fuel_mix_2050 %>% 
   left_join(e_factors, by = "fuel")     # left_join combines two tables, taking all 
                                         # rows from world_fuel, and combining the
@@ -224,6 +224,8 @@ a plant produces during a year is the product
 $$\text{average power} = \text{nameplate capacity} \times \text{capacity factor}$$
 The following table shows the power output from different kinds of power plants.
 
+Now we are ready to calculate the number of power plants we have to construct between now and `r target_year`.
+
 ```{r power plant capacity}
 capacity = generation_capacity()
 # Capacity has columns for:
@@ -246,5 +248,207 @@ kable(capacity, digits = c(0,0,2,5,1))
 ```
 
 Now we are ready to calculate the number of power plants we have to construct between now and `r target_year`.
+
+### Nuclear Power
+
+```{r number_clean_plants}
+nuclear_plants_per_quad = filter(capacity, fuel == "Nuclear")$plants_per_quad
+
+world_new_nuclear_plants = world_new_clean_energy * nuclear_plants_per_quad
+```
+
+To replace `r round(world_new_clean_energy)` quads of energy with nuclear power, 
+we would need to build `r round(world_new_nuclear_plants)` nuclear power plants between
+`r start_year` nad `r target_year`. 
+
+This would come to `r round(world_new_nuclear_plants / (target_year - start_year), 1)`
+plants per year.
+
+# China
+```{r load_china_data}
+target_china_reduction = 0.78
+
+china_data = get_kaya_data("China")
+china_fuel_mix = get_fuel_mix("China") %>% arrange(fuel)
+china_projection = project_top_down("China", target_year)
+
+target_china_emissions = filter(china_data, year == reference_year)$F * (1 - target_china_reduction)
+projected_china_E = china_projection$E
+```
+The pathway for keeping warming below 2&deg;C implies a target of reducing 
+global CO~2~ emissions by `r format_md(100 * target_china_reduction, 0)`% 
+below the `r reference_year` level by `r target_year`, which would be
+`r format_md(target_china_emissions,1)`  million metric tons.
+Top-down projections predict that global energy demand will be 
+`r format_md(projected_china_E, 0)` quads in `r target_year`, so what does that imply for 
+ the need to install low-carbon energy?
+ 
+ The current energy mix is shown in the Figure below:
+ 
+```{r china_fuel_mix_figure, fig.width=7, fig.height=5}
+ e_factors = emissions_factors()
+ 
+ plot_fuel_mix(china_fuel_mix)
+```
+
+Let's calculate what the emissions in `r target_year` would be if the china 
+were still using this fuel mix.
+
+```{r china_emissions_factor_table}
+kable(e_factors)
+```
+
+
+## Top-Down Projection of Energy Demand and Emissions in `r target_year`
+
+First, let's calculate how many quads of energy of each fuel the china would
+be consuming in 2050:
+
+```{r china_fuel_mix_2050}
+china_fuel_mix_2050 = china_fuel_mix %>% 
+  select(fuel, pct) %>% # We only need to worry about the percentage of each fuel
+  mutate(quads = projected_china_E * pct / 100) # We multiply the total energy demand by 
+                                    # The percentage from each fuel to figure
+                                    # the number of quads of each fuel that
+                                    # the china would consume if the fuel
+                                    # mix stayed the same.
+  kable(china_fuel_mix_2050, digits = c(0,1,0))
+```
+
+Now, let's combine the emissions factors and the fuel mix into a single table:
+
+```{r china_emissions_tab, warning = FALSE}
+china_fuel_mix_2050 = china_fuel_mix_2050 %>% 
+  left_join(e_factors, by = "fuel")     # left_join combines two tables, taking all 
+                                        # rows from china_fuel, and combining the
+                                        # rows of e_factors by matching the column 
+                                        # "fuel" for the two tables. Because it's a 
+                                        # left join, it ignores any rows of e_factors 
+                                        # if the "fuel" doesn't have a matching row 
+                                        # in china_fuel_mix
+  
+  kable(china_fuel_mix_2050, digits = c(0, 0, 0, 0, 1))  
+```
+
+Now that we combined the tables, we can multiply the number of quads by the 
+emission factors to get the emissions from each fuel:
+
+```{r china_emissions_2050}
+# Multiply quads times emissions factor to get emissions
+china_emissions_2050 = china_fuel_mix_2050 %>%
+  mutate(emissions = quads * emission_factor)
+
+# Print a table 
+kable(china_emissions_2050, digits = c(0, 1, 0, 1, 0), 
+      format.args = list("big.mark" = ","),
+      col.names = c("Fuel", "%", "Quads", "MMT/Quad", "MMT CO2"))
+```
+
+## Implied Emissions Reduction for `r target_year`
+
+```{r calculate_china_emissions_reduction}
+
+# Add up all the emissions to get the total
+total_china_emissions_2050 = sum(china_emissions_2050$emissions)
+
+# Emissions reduction necessary to meet target
+delta_china_emissions = total_china_emissions_2050 - target_china_emissions
+
+# Separate each fossil fuel to make calculations easier
+
+china_coal_2050 = filter(china_emissions_2050, fuel == "Coal")
+china_gas_2050 = filter(china_emissions_2050, fuel == "Natural Gas")
+china_oil_2050 = filter(china_emissions_2050, fuel == "Oil")
+
+# Reduction from eliminating both coal and gas
+
+china_coal_gas_reduction = china_coal_2050$emissions + china_gas_2050$emissions
+
+
+# What's left that we have to meet by reducing oil consumption
+china_remainder = delta_china_emissions - china_coal_gas_reduction
+
+oil_factor = filter(e_factors, fuel == "Oil")$emission_factor
+
+# Quads of oil we have to replace with renewables.
+delta_china_oil_quads = china_remainder / oil_factor
+
+# Total clean energy needs
+china_new_clean_energy = delta_china_oil_quads + china_coal_2050$quads +
+  china_gas_2050$quads
+```
+
+The total emissions in `r target_year` woulld be 
+`r format_md(total_china_emissions_2050, digits = 0, comma = TRUE, scientific = FALSE)` 
+million metric tons.
+We need to get this down to the target of 
+`r format_md(target_china_emissions, digits = 0, comma = TRUE, scientific = FALSE)`
+million metric tons. Thus, we have to replace 
+`r format_md(delta_china_emissions, digits = 0, comma = TRUE, scientific = FALSE)` 
+million metric tons
+of fossil-fuel emissions with renewable energy.
+
+We can start by eliminating coal, which will reduce emissions by 
+`r format_md(china_coal_2050$emissions, digits = 0, comma = TRUE, scientific = FALSE)`
+MMT. 
+Next, we can eliminate gas, which will reduce emissions by 
+`r format_md(china_gas_2050$emissions, digits = 0, comma = TRUE, scientific = FALSE)`
+
+(**Why do we eliminate gas next, when oil is responsible for much more emissions?**)
+
+This gives us total emissions reduction of 
+`r format_md(china_coal_gas_reduction, 0, comma = TRUE, scientific = FALSE)` MMT.
+That leaves 
+`r format_md(delta_china_emissions - china_coal_gas_reduction, 0, comma = TRUE, scientific = FALSE)`
+MMT to be eliminated by reducing oil consumption.
+
+Eliminating coal requires 
+`r round(china_coal_2050$quads)` 
+quads of clean energy to replace coal, 
+eliminating gas requires
+`r round(china_gas_2050$quads)` 
+quads of clean energy to replace natural gas,
+and finally, we must replace 
+`r round(delta_china_oil_quads)` 
+quads of oil with clean energy. 
+This adds up to 
+`r round(china_new_clean_energy)`
+quads of new clean energy.
+
+
+## Clean power requirements
+
+If we want to provide this `r round(china_new_clean_energy)` quads per year
+of clean 
+energy using nuclear power, we need to figure out how many nuclear power
+plants it takes to produce a quad per year.
+
+Power plants have a "nameplate capacity", which indicates the power they
+would produce if they ran full out 24/7. In fact, power plants can't do this
+because they need down time for maintenance and solar and wind are also subject
+to the fact that the sun does not shine all the time, nor does the wind blow
+at its full strength all the time.
+
+We represent the down-time by a "capacity factor," so the actual average power
+a plant produces during a year is the product 
+$$\text{average power} = \text{nameplate capacity} \times \text{capacity factor}$$
+The following table shows the power output from different kinds of power plants.
+
+
+### Nuclear Power
+
+```{r china_clean_plants}
+nuclear_plants_per_quad = filter(capacity, fuel == "Nuclear")$plants_per_quad
+
+china_new_nuclear_plants = china_new_clean_energy * nuclear_plants_per_quad
+```
+
+To replace `r round(china_new_clean_energy)` quads of energy with nuclear power, 
+we would need to build `r round(china_new_nuclear_plants)` nuclear power plants between
+`r start_year` nad `r target_year`. 
+
+This would come to `r round(china_new_nuclear_plants / (target_year - start_year), 1)`
+plants per year.
+
 
 # References
